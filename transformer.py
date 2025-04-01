@@ -11,17 +11,27 @@ class EmbeddingLayer(torch.nn.Module):
         self.vocab_size = vocab_size
         self.data = data
 
+        # Going to assume the dimension is going to be 5
         self.token_embedding_table = torch.nn.Embedding(
-            self.vocab_size, self.vocab_size
+            self.vocab_size, 10
         )
 
     def forward(self, x, y: torch.Tensor = None):
         logits: torch.Tensor = self.token_embedding_table(x)
+        with open("help.txt", "w") as f:
+            for _ in logits.tolist():
+                for i in _:
+                    f.write(str(i) + "\n")
+
+        from pprint import pprint
+        pprint(str(logits.tolist()) + "\n\n\n\n")
+        pprint(x)
+        exit()
         if y is None:
             loss = None
         else:
             # logits becomesa tensor of size (Batch size, Sequence Length (T), vocab_size)
-            B, T, C = logits.shape  # (Batch size, Sequence Length (T), vocab_size)
+            B, T, C  = logits.shape  # (Batch size, Sequence Length (T), vocab_size)
             logits = logits.view(
                 B * T, C
             )  # reshape the logits so they can be used in cross entropy loss
