@@ -13,20 +13,20 @@ class EmbeddingLayer(torch.nn.Module):
 
         # Going to assume the dimension is going to be 5
         self.token_embedding_table = torch.nn.Embedding(
-            self.vocab_size, 10
+            self.vocab_size, 2
         )
 
     def forward(self, x, y: torch.Tensor = None):
+        
         logits: torch.Tensor = self.token_embedding_table(x)
         with open("help.txt", "w") as f:
             for _ in logits.tolist():
                 for i in _:
                     f.write(str(i) + "\n")
 
-        from pprint import pprint
-        pprint(str(logits.tolist()) + "\n\n\n\n")
-        pprint(x)
-        exit()
+        # from pprint import pprint
+        # pprint(str(logits.tolist()) + "\n\n\n\n")
+        # pprint(x)
         if y is None:
             loss = None
         else:
@@ -75,6 +75,7 @@ def get_batch(split, train_data, val_data, block_size, batch_size):
     ix = torch.randint(len(data) - block_size, (batch_size,))
     x = torch.stack([data[i : i + block_size] for i in ix])
     y = torch.stack([data[i + 1 : i + block_size + 1] for i in ix])
+    print(x)
     return x, y
 
 
