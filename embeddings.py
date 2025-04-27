@@ -27,39 +27,6 @@ dropout = 0.2
 # ------------
 
 
-# tokenizer = AutoTokenizer.from_pretrained("gpt2")
-# num_proc = min(16, os.cpu_count())
-
-
-# ds = load_dataset("upstage/Pretraining_Dataset", split="train")
-
-
-# def process_input():
-
-#     def tokenize_batch(batch):
-#         return tokenizer(
-#             batch["text"],
-#             padding=False,
-#             truncation=False,
-#         )
-
-#     tokenized_ds = ds.map(tokenize_batch, batched=True, num_proc=num_proc)
-#     flat_encoded = [token for example in tokenized_ds["input_ids"] for token in example]
-#     return torch.tensor(flat_encoded, dtype=torch.long)
-
-
-# def build_cbow_pairs(data, context_size=2):
-#     for i in range(context_size, len(data) - context_size):
-#         left = data[i - context_size : i]
-#         right = data[i + 1 : i + context_size + 1]
-#         context = torch.cat((left, right))
-#         center = data[i]
-#         yield context, center
-
-
-# data = process_input()
-
-
 class EmbeddingLayer(torch.nn.Module):
     def __init__(
         self,
@@ -88,36 +55,74 @@ class EmbeddingLayer(torch.nn.Module):
         return out.squeeze(0)
 
 
-# d_model = 20
-# vocab_size = tokenizer.vocab_size
-# embedding_layer = EmbeddingLayer(vocab_size, vocab_size, d_model)
-# embedding_layer.to("cuda")
-# loss_fn = torch.nn.CrossEntropyLoss()
-# optimizer = torch.optim.Adam(embedding_layer.parameters(), lr=1e-3)
+def process_input(tokenizer, num_proc):
 
-# # train the model
-# for epoch in range(1):
-#     step = 0
-#     log_loss = 0
-#     for context, target in build_cbow_pairs(data, CONTEXT_SIZE):
+    ds = load_dataset("upstage/Pretraining_Dataset", split="train")
 
-#         context = context.to("cuda")
-#         target = target.to("cuda")
+    def tokenize_batch(batch):
+        return tokenizer(
+            batch["text"],
+            padding=False,
+            truncation=False,
+        )
 
-#         optimizer.zero_grad()
-#         logits = embedding_layer(context)
+    tokenized_ds = ds.map(tokenize_batch, batched=True, num_proc=num_proc)
+    flat_encoded = [token for example in tokenized_ds["input_ids"] for token in example]
+    return torch.tensor(flat_encoded, dtype=torch.long)
 
-#         loss = loss_fn(logits, target)
-#         loss.backward()
-#         optimizer.step()
-#         log_loss += loss.item()
 
-#         if step % 1000 == 0 and step > 0:
-#             print(f"Step {step}, Avg loss (last {1000}): {log_loss / 1000:.4f}")
-#             log_loss = 0
-#         step += 1
+def build_cbow_pairs(data, context_size=2):
+    for i in range(context_size, len(data) - context_size):
+        left = data[i - context_size : i]
+        right = data[i + 1 : i + context_size + 1]
+        context = torch.cat((left, right))
+        center = data[i]
+        yield context, center
 
-# if os.path.exist("trained_model.pt"):
-#     torch.save(embedding_layer.state_dict(), "trained_model2.pt")
-# torch.save(embedding_layer.state_dict(), "trained_model.pt")
-# print("done", file=sys.stderr)
+
+def main():
+
+    tokenizer = AutoTokenizer.from_pretrained("gpt2")
+    num_proc = os.cpu_count() / 2
+
+    data = process_input(tokenizer, num_proc)
+
+    d_model = 20
+    vocab_size = tokenizer.vocab_size
+    embedding_layer = EmbeddingLayer(vocab_size, vocab_size, d_model)
+    embedding_layer.to("cuda")
+
+    loss_fn = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(embedding_layer.parameters(), lr=1e-3)
+
+    # train the model
+    for epoch in range(1):
+        step = 0
+        log_loss = 0
+        for context, target in build_cbow_pairs(data, CONTEXT_SIZE):
+
+            context = context.to("cuda")
+            target = target.to("cuda")
+
+            optimizer.zero_grad()
+            logits = embedding_layer(context)
+
+            loss = loss_fn(logits, target)
+            loss.backward()
+            optimizer.step()
+            log_loss += loss.item()
+
+            if step % 1000 == 0 and step > 0:
+                print(f"Step {step}, Avg loss (last {1000}): {log_loss / 1000:.4f}")
+                log_loss = 0
+            step += 1
+
+            # save the model
+            if os.path.exist("trained_model.pt"):
+                torch.save(embedding_layer.state_dict(), "trained_model2.pt")
+            torch.save(embedding_layer.state_dict(), "trained_model.pt")
+            print("done", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
