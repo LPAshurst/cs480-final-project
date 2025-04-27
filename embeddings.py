@@ -2,8 +2,10 @@ import torch
 from torch.nn import functional as F
 from datasets import load_dataset
 from transformers import AutoTokenizer
-from torch.utils.data import DataLoader
 import os
+import sys
+
+print("starting...", file=sys.stderr)
 
 # hyperparameters
 BATCH_SIZE = 64  # how many independent sequences will we process in parallel?
@@ -25,37 +27,37 @@ dropout = 0.2
 # ------------
 
 
-tokenizer = AutoTokenizer.from_pretrained("gpt2")
-num_proc = min(16, os.cpu_count())
+# tokenizer = AutoTokenizer.from_pretrained("gpt2")
+# num_proc = min(16, os.cpu_count())
 
 
-ds = load_dataset("upstage/Pretraining_Dataset", split="train")
+# ds = load_dataset("upstage/Pretraining_Dataset", split="train")
 
 
-def process_input():
+# def process_input():
 
-    def tokenize_batch(batch):
-        return tokenizer(
-            batch["text"],
-            padding=False,
-            truncation=False,
-        )
+#     def tokenize_batch(batch):
+#         return tokenizer(
+#             batch["text"],
+#             padding=False,
+#             truncation=False,
+#         )
 
-    tokenized_ds = ds.map(tokenize_batch, batched=True, num_proc=num_proc)
-    flat_encoded = [token for example in tokenized_ds["input_ids"] for token in example]
-    return torch.tensor(flat_encoded, dtype=torch.long)
-
-
-def build_cbow_pairs(data, context_size=2):
-    for i in range(context_size, len(data) - context_size):
-        left = data[i - context_size : i]
-        right = data[i + 1 : i + context_size + 1]
-        context = torch.cat((left, right))
-        center = data[i]
-        yield context, center
+#     tokenized_ds = ds.map(tokenize_batch, batched=True, num_proc=num_proc)
+#     flat_encoded = [token for example in tokenized_ds["input_ids"] for token in example]
+#     return torch.tensor(flat_encoded, dtype=torch.long)
 
 
-data = process_input()
+# def build_cbow_pairs(data, context_size=2):
+#     for i in range(context_size, len(data) - context_size):
+#         left = data[i - context_size : i]
+#         right = data[i + 1 : i + context_size + 1]
+#         context = torch.cat((left, right))
+#         center = data[i]
+#         yield context, center
+
+
+# data = process_input()
 
 
 class EmbeddingLayer(torch.nn.Module):
@@ -80,39 +82,42 @@ class EmbeddingLayer(torch.nn.Module):
 
     def forward(self, x):
         embeds: torch.Tensor = self.token_embedding_table(x)
-        input_embeds = embeds.mean(dim=1)
+        input_embeds = embeds.mean(dim=0, keepdim=True)
 
         out: torch.Tensor = self.linear_one(input_embeds)
         return out.squeeze(0)
 
 
-d_model = 8
-vocab_size = tokenizer.vocab_size
-embedding_layer = EmbeddingLayer(vocab_size, vocab_size, d_model)
-embedding_layer.to("cuda")
-loss_fn = torch.nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(embedding_layer.parameters(), lr=1e-3)
+# d_model = 20
+# vocab_size = tokenizer.vocab_size
+# embedding_layer = EmbeddingLayer(vocab_size, vocab_size, d_model)
+# embedding_layer.to("cuda")
+# loss_fn = torch.nn.CrossEntropyLoss()
+# optimizer = torch.optim.Adam(embedding_layer.parameters(), lr=1e-3)
 
-# train the model
-for epoch in range(1):
-    step = 0
-    log_loss = 0
-    for context, target in build_cbow_pairs(data, CONTEXT_SIZE):
-        # print(context, "->", target)
+# # train the model
+# for epoch in range(1):
+#     step = 0
+#     log_loss = 0
+#     for context, target in build_cbow_pairs(data, CONTEXT_SIZE):
 
-        context = context.to("cuda")
-        target = target.to("cuda")
+#         context = context.to("cuda")
+#         target = target.to("cuda")
 
-        optimizer.zero_grad()
-        logits = embedding_layer(context)
+#         optimizer.zero_grad()
+#         logits = embedding_layer(context)
 
-        loss = loss_fn(logits, target)
-        loss.backward()
-        optimizer.step()
-        log_loss += loss.item()
+#         loss = loss_fn(logits, target)
+#         loss.backward()
+#         optimizer.step()
+#         log_loss += loss.item()
 
-        if step % 1000 == 0 and step > 0:
-            print(f"Step {step}, Avg loss (last {1000}): {log_loss / 1000:.4f}")
-            log_loss = 0
-        step += 1
-torch.save(embedding_layer.state_dict(), "trained_model.pt")
+#         if step % 1000 == 0 and step > 0:
+#             print(f"Step {step}, Avg loss (last {1000}): {log_loss / 1000:.4f}")
+#             log_loss = 0
+#         step += 1
+
+# if os.path.exist("trained_model.pt"):
+#     torch.save(embedding_layer.state_dict(), "trained_model2.pt")
+# torch.save(embedding_layer.state_dict(), "trained_model.pt")
+# print("done", file=sys.stderr)
