@@ -1,6 +1,7 @@
 import torch
 from torch.nn import functional as F
-from datasets import load_dataset
+from torch.utils.data import DataLoader
+from datasets import load_dataset, IterableDataset
 from transformers import AutoTokenizer
 import os
 import sys
@@ -57,18 +58,22 @@ class EmbeddingLayer(torch.nn.Module):
 
 def process_input(tokenizer, num_proc):
 
-    ds = load_dataset("upstage/Pretraining_Dataset", split="train")
+    ds = load_dataset("wikimedia/wikipedia", "20231101.en")
+    # when we pad now the map function will know what to do
+    tokenizer.pad_token = tokenizer.eos_token
 
     def tokenize_batch(batch):
         return tokenizer(
-            batch["text"],
-            padding=False,
-            truncation=False,
+            batch["text"], padding="max_length", truncation=True, max_length=1024
         )
 
-    tokenized_ds = ds.map(tokenize_batch, batched=True, num_proc=num_proc)
-    flat_encoded = [token for example in tokenized_ds["input_ids"] for token in example]
-    return torch.tensor(flat_encoded, dtype=torch.long)
+    tokenized_ds: IterableDataset = ds.map(
+        tokenize_batch,
+        batched=True,
+        num_proc=num_proc,
+    )
+    dataloader = DataLoader(tokenized_ds, BATCH_SIZE)
+    return dataloader
 
 
 def build_cbow_pairs(data, context_size=2):
@@ -84,10 +89,9 @@ def main():
 
     tokenizer = AutoTokenizer.from_pretrained("gpt2")
     print(os.cpu_count())
-    exit()
-    num_proc = os.cpu_count() - 4
+    num_proc = int(os.cpu_count() / 3)
 
-    data = process_input(tokenizer, num_proc)
+    dataloader = process_input(tokenizer, num_proc)
 
     d_model = 20
     vocab_size = tokenizer.vocab_size
@@ -101,7 +105,7 @@ def main():
     for epoch in range(1):
         step = 0
         log_loss = 0
-        for context, target in build_cbow_pairs(data, CONTEXT_SIZE):
+        for batch in dataloader:
 
             context = context.to("cuda")
             target = target.to("cuda")
@@ -120,7 +124,7 @@ def main():
             step += 1
 
             # save the model
-            if os.path.exist("trained_model.pt"):
+            if os.path.exists("trained_model.pt"):
                 torch.save(embedding_layer.state_dict(), "trained_model2.pt")
             torch.save(embedding_layer.state_dict(), "trained_model.pt")
             print("done", file=sys.stderr)
