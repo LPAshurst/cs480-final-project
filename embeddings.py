@@ -57,7 +57,8 @@ class EmbeddingLayer(torch.nn.Module):
 
 def process_input(tokenizer, num_proc):
 
-    ds = load_dataset("upstage/Pretraining_Dataset", split="train")
+    ds = load_dataset("Publishing/pretraining_v1", split="train")
+    # ds = load_dataset("upstage/Pretraining_Dataset", split="train")
 
     def tokenize_batch(batch):
         return tokenizer(
@@ -84,7 +85,6 @@ def main():
 
     tokenizer = AutoTokenizer.from_pretrained("gpt2")
     print(os.cpu_count())
-    exit()
     num_proc = os.cpu_count() - 4
 
     data = process_input(tokenizer, num_proc)

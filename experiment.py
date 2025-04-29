@@ -1,24 +1,22 @@
 import torch
-from torch.nn import functional as F
-from torch.utils.data import DataLoader
-from datasets import load_dataset, IterableDataset
+from datasets import load_dataset
 from transformers import AutoTokenizer
+from torch.utils.data import DataLoader
 import os
 import sys
+from custom_dataloader import CBOWDataset
 
 print("starting...", file=sys.stderr)
 
 # hyperparameters
 BATCH_SIZE = 64  # how many independent sequences will we process in parallel?
 CONTEXT_SIZE = 4  # what is the maximum context length for predictions?
+D_EMBEDDINGS = 20
+
 max_iters = 5000
 eval_interval = 500
 learning_rate = 3e-4
-(
-    torch.set_default_device("cuda")
-    if torch.cuda.is_available()
-    else torch.set_default_device("cpu")
-)
+
 print(torch.cuda.is_available())
 eval_iters = 200
 n_embd = 384
@@ -32,7 +30,6 @@ class EmbeddingLayer(torch.nn.Module):
     def __init__(
         self,
         vocab_size,
-        input_token_size,
         d_model,
     ):
         super().__init__()
@@ -40,7 +37,6 @@ class EmbeddingLayer(torch.nn.Module):
         # define some important vars
         self.vocab_size = vocab_size
         self.d_model = d_model
-        self.input_size = input_token_size
 
         self.token_embedding_table = torch.nn.Embedding(
             vocab_size,
@@ -49,85 +45,107 @@ class EmbeddingLayer(torch.nn.Module):
         self.linear_one = torch.nn.Linear(d_model, vocab_size)
 
     def forward(self, x):
-        embeds: torch.Tensor = self.token_embedding_table(x)
-        input_embeds = embeds.mean(dim=0, keepdim=True)
-
-        out: torch.Tensor = self.linear_one(input_embeds)
-        return out.squeeze(0)
+        embeds = self.token_embedding_table(x)
+        input_embeds = embeds.sum(dim=1)  # (batch_size, d_model)
+        out = self.linear_one(input_embeds)  # (batch_size, vocab_size)
+        return out
 
 
 def process_input(tokenizer, num_proc):
 
-    ds = load_dataset("wikimedia/wikipedia", "20231101.en")
+    ds = load_dataset("Publishing/pretraining_v1", split="train")
+    # ds = load_dataset(
+    #     "wikimedia/wikipedia",
+    #     "20231101.en",
+    #     split="train",
+    #     cache_dir="/scratch",
+    #     num_proc=num_proc,
+    # )
     # when we pad now the map function will know what to do
     tokenizer.pad_token = tokenizer.eos_token
 
-    def tokenize_batch(batch):
+    def tokenize_function(batch):
         return tokenizer(
-            batch["text"], padding="max_length", truncation=True, max_length=1024
+            batch["text"],
+            padding="max_length",
+            truncation=True,
+            max_length=128,
         )
 
-    tokenized_ds: IterableDataset = ds.map(
-        tokenize_batch,
-        batched=True,
-        num_proc=num_proc,
+    tokenized = ds.map(tokenize_function, batched=True, num_proc=num_proc)
+
+    dataset = CBOWDataset(tokenized, context_size=2)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        pin_memory=True,
     )
-    dataloader = DataLoader(tokenized_ds, BATCH_SIZE)
     return dataloader
 
 
-def build_cbow_pairs(data, context_size=2):
-    for i in range(context_size, len(data) - context_size):
-        left = data[i - context_size : i]
-        right = data[i + 1 : i + context_size + 1]
-        context = torch.cat((left, right))
-        center = data[i]
-        yield context, center
+def build_cbow_pairs(tokens, context_size=2):
+    pairs = []
+    for i in range(context_size, len(tokens) - context_size):
+        left = tokens[i - context_size : i]
+        right = tokens[i + 1 : i + context_size + 1]
+        context = left + right  # still list of ints
+        center = tokens[i]
+        pairs.append((context, center))
+    return pairs
 
 
 def main():
 
     tokenizer = AutoTokenizer.from_pretrained("gpt2")
-    print(os.cpu_count())
-    num_proc = int(os.cpu_count() / 3)
+    num_proc = int(os.cpu_count() / 2)
 
     dataloader = process_input(tokenizer, num_proc)
 
-    d_model = 20
     vocab_size = tokenizer.vocab_size
-    embedding_layer = EmbeddingLayer(vocab_size, vocab_size, d_model)
+    embedding_layer = EmbeddingLayer(vocab_size, D_EMBEDDINGS)
     embedding_layer.to("cuda")
 
     loss_fn = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(embedding_layer.parameters(), lr=1e-3)
 
     # train the model
-    for epoch in range(1):
-        step = 0
-        log_loss = 0
-        for batch in dataloader:
+    step = 0
+    log_loss = 0
+    for batch in dataloader:
+        context_batch = batch["contexts"].to(
+            "cuda", non_blocking=True
+        )  # (batch_size, 4)
+        center_batch = batch["centers"].to("cuda", non_blocking=True)  # (batch_size)
 
-            context = context.to("cuda")
-            target = target.to("cuda")
+        optimizer.zero_grad()
+        logits = embedding_layer(context_batch)
+        loss = loss_fn(logits, center_batch)
+        loss.backward()
+        optimizer.step()
 
-            optimizer.zero_grad()
-            logits = embedding_layer(context)
+        if step % 1000 == 0 and step > 0:
+            print(f"Step {step}, Avg loss (last {1000}): {log_loss / 1000:.4f}")
+            log_loss = 0
+        step += 1
 
-            loss = loss_fn(logits, target)
-            loss.backward()
-            optimizer.step()
-            log_loss += loss.item()
+    try:
 
-            if step % 1000 == 0 and step > 0:
-                print(f"Step {step}, Avg loss (last {1000}): {log_loss / 1000:.4f}")
-                log_loss = 0
-            step += 1
+        if os.path.exists("trained_model.pt"):
+            torch.save(
+                embedding_layer.state_dict(),
+                f"trained_model_{D_EMBEDDINGS}_{CONTEXT_SIZE}.pt",
+            )
+        else:
+            torch.save(
+                embedding_layer.state_dict(),
+                f"trained_model_{D_EMBEDDINGS}_{CONTEXT_SIZE}.pt",
+            )
 
-            # save the model
-            if os.path.exists("trained_model.pt"):
-                torch.save(embedding_layer.state_dict(), "trained_model2.pt")
-            torch.save(embedding_layer.state_dict(), "trained_model.pt")
-            print("done", file=sys.stderr)
+    except:
+        torch.save(embedding_layer.state_dict(), f"trained_model_fallback.pt")
+
+    print("done", file=sys.stderr)
 
 
 if __name__ == "__main__":
