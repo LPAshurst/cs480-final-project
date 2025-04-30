@@ -11,7 +11,8 @@ print("starting...", file=sys.stderr)
 # hyperparameters
 BATCH_SIZE = 64  # how many independent sequences will we process in parallel?
 CONTEXT_SIZE = 4  # what is the maximum context length for predictions?
-D_EMBEDDINGS = 20
+D_EMBEDDINGS = 64
+DATA_SET_SIZE = 400_000
 
 max_iters = 5000
 eval_interval = 500
@@ -53,14 +54,14 @@ class EmbeddingLayer(torch.nn.Module):
 
 def process_input(tokenizer, num_proc):
 
-    ds = load_dataset("Publishing/pretraining_v1", split="train")
-    # ds = load_dataset(
-    #     "wikimedia/wikipedia",
-    #     "20231101.en",
-    #     split="train",
-    #     cache_dir="/scratch",
-    #     num_proc=num_proc,
-    # )
+    # ds = load_dataset("Publishing/pretraining_v1", split="train")
+    ds = load_dataset(
+        "wikimedia/wikipedia",
+        "20231101.en",
+        split="train",
+        cache_dir="/scratch",
+        num_proc=num_proc,
+    )
     # when we pad now the map function will know what to do
     tokenizer.pad_token = tokenizer.eos_token
 
@@ -72,6 +73,9 @@ def process_input(tokenizer, num_proc):
             max_length=128,
         )
 
+    ds = ds.select(
+        range(DATA_SET_SIZE)
+    )  # selects first n rows. (the dataset was a bit too big so had to split)
     tokenized = ds.map(tokenize_function, batched=True, num_proc=num_proc)
 
     dataset = CBOWDataset(tokenized, context_size=2)
@@ -98,7 +102,7 @@ def build_cbow_pairs(tokens, context_size=2):
 def main():
 
     tokenizer = AutoTokenizer.from_pretrained("gpt2")
-    num_proc = int(os.cpu_count() / 2)
+    num_proc = int(os.cpu_count() / 3)
 
     dataloader = process_input(tokenizer, num_proc)
 
@@ -129,23 +133,21 @@ def main():
             log_loss = 0
         step += 1
 
-    try:
+    print("done with for loop", file=sys.stderr)
 
-        if os.path.exists("trained_model.pt"):
-            torch.save(
-                embedding_layer.state_dict(),
-                f"trained_model_{D_EMBEDDINGS}_{CONTEXT_SIZE}.pt",
-            )
-        else:
-            torch.save(
-                embedding_layer.state_dict(),
-                f"trained_model_{D_EMBEDDINGS}_{CONTEXT_SIZE}.pt",
-            )
+    try:
+        torch.save(
+            embedding_layer.state_dict(),
+            f"trained_model_{D_EMBEDDINGS}_{CONTEXT_SIZE}_{DATA_SET_SIZE}.pt",
+        )
+
+        torch.save(
+            embedding_layer.state_dict(),
+            f"trained_model_{D_EMBEDDINGS}_{CONTEXT_SIZE}_{DATA_SET_SIZE}.pt",
+        )
 
     except:
         torch.save(embedding_layer.state_dict(), f"trained_model_fallback.pt")
-
-    print("done", file=sys.stderr)
 
 
 if __name__ == "__main__":

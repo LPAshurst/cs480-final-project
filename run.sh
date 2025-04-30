@@ -1,3 +1,4 @@
 source /cs/shr/cs445/anaconda3/bin/activate
+conda init
 conda activate gpu
-python experiment.py
+python embedding_model.py

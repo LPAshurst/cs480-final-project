@@ -10,6 +10,10 @@ __pycache__/
 # files
 data.pt
 *.log
+*.log2
+*.log3
+*.log4
+.vector_cache
 *.pt
 
 # Distribution / packaging
