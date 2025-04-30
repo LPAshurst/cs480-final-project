@@ -15,7 +15,7 @@ data.pt
 *.log4
 .vector_cache
 *.pt
-
+*.txt
 # Distribution / packaging
 .Python
 build/

@@ -12,13 +12,12 @@ print("starting...", file=sys.stderr)
 BATCH_SIZE = 64  # how many independent sequences will we process in parallel?
 CONTEXT_SIZE = 4  # what is the maximum context length for predictions?
 D_EMBEDDINGS = 64
-DATA_SET_SIZE = 400_000
+DATA_SET_SIZE = 300_000
 
 max_iters = 5000
 eval_interval = 500
 learning_rate = 3e-4
 
-print(torch.cuda.is_available())
 eval_iters = 200
 n_embd = 384
 n_head = 6
